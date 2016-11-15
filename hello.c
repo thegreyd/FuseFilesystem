@@ -214,8 +214,8 @@ static int hello_open(const char *path, struct fuse_file_info *fi)
 			return 0;
 		}
 	}
-	if ((fi->flags & 3) != O_RDONLY)
-		return -EACCES;
+	//if ((fi->flags & 3) != O_RDONLY)
+	//	return -EACCES;
 
 	return -ENOENT;
 }
@@ -236,8 +236,8 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 			size2 = block_size;
 			fileblock = nodes[i].start;
 
-			while (offset2 < len) {	
-				if (offset2 + block_size > len){
+			while ( offset2 < len ) {	
+				if ( offset2 + block_size > len ){
 					size2 = len - offset2;
 				}
 				
