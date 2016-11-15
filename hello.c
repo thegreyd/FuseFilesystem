@@ -223,11 +223,12 @@ static int hello_open(const char *path, struct fuse_file_info *fi)
 static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-	size_t len;
+	//return number of bytes read
+	size_t len, offset2=0;
 	(void) fi;
 	
 	block* fileblock;
-	int offset2=0,size2;
+	int size2;
 
 	for(int i=0; i<100; i++) {
 		if ( node_bitmap[i]==1 && strcmp(path, nodes[i].path) == 0 ) {
@@ -244,7 +245,7 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 				fileblock = fileblock->next_block;
 				offset2+=size2;
 			}			
-			return size;
+			return offset2;
 		}
 	}
 	return -ENOENT;
