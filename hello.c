@@ -19,13 +19,10 @@
 
 #define block_size 4
 
-static const char *hello_str = "Hello World!\n";
-static const char *hello_path = "/hello";
-
-typedef struct 
+typedef struct b
 {
 	char data[block_size];
-	int next_block;
+	struct b* next_block;
 } block;
 
 typedef struct 
@@ -81,6 +78,7 @@ int makefile(char *path, char *content)
 	printf("--------------makefile\n");
 	node* file;
 	block* fileblock;
+	block* fileblock2;
 
 	file = get_free_node();
 	
@@ -88,10 +86,33 @@ int makefile(char *path, char *content)
 	file->path = path;
 	file->is_dir = 0;
 	
+	int offset = 0;
+	size_t len = strlen(content);
+
 	fileblock = get_free_block();
-	memcpy(fileblock, content, strlen(content));
-	file->size = strlen(content);
 	file->start = fileblock;
+	
+	int size = block_size;
+	if (size > len){
+		size = len - offset;
+	}
+	memcpy(fileblock, content, size);
+	offset += size;
+	
+	while ( offset < len ) {
+		if (offset + size > len){
+			size = len - offset;
+		}
+	
+		fileblock2 = get_free_block();
+		fileblock->next_block = fileblock2;
+		memcpy(fileblock2, content+offset, size);
+		offset += size;
+		fileblock = fileblock2;
+	}
+
+	fileblock->next_block = NULL;
+	file->size = offset;
 
 	return 0;
 }
@@ -114,8 +135,8 @@ int myinit(){
 	
 	nodes = (node *) malloc(100*sizeof(node));
 	blocks = (block *) malloc(100*sizeof(block));
-	makefile("/file.txt","file");
-	makefile("/b.txt","b");
+	makefile("/file.txt","filehellhellomypeople good boy ! poop");
+	makefile("/b.txt","bahah12323 &8&* !");
 
 	return 0;
 }
@@ -143,25 +164,24 @@ void destroy(void *p)
 
 static int hello_getattr(const char *path, struct stat *stbuf)
 {
-	int res = 0;
 
 	memset(stbuf, 0, sizeof(struct stat));
 	if (strcmp(path, "/") == 0) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
-	} else {
-		for(int i=0; i<100; i++) {
-			if ( node_bitmap[i]==1 && strcmp(path, nodes[i].path) == 0) {
-				stbuf->st_mode = nodes[i].mode;
-				stbuf->st_nlink = 1;
-				stbuf->st_size = nodes[i].size;		
-				return 0;
-			}
+		return 0;
+	} 
+	
+	for(int i=0; i<100; i++) {
+		if ( node_bitmap[i]==1 && strcmp(path, nodes[i].path) == 0) {
+			stbuf->st_mode = nodes[i].mode;
+			stbuf->st_nlink = 1;
+			stbuf->st_size = nodes[i].size;		
+			return 0;
 		}
-		res = -ENOENT;
 	}
-
-	return res;
+	
+	return -ENOENT;
 }
 
 static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
@@ -170,8 +190,8 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	(void) offset;
 	(void) fi;
 
-	//if (strcmp(path, "/") != 0)
-	//	return -ENOENT;
+	if (strcmp(path, "/") != 0)
+		return -ENOENT;
 
 	filler(buf, ".", NULL, 0);
 	filler(buf, "..", NULL, 0);
@@ -205,24 +225,29 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	size_t len;
 	(void) fi;
-	//if(strcmp(path, hello_path) != 0)
-	//	return -ENOENT;
+	
+	block* fileblock;
+	int offset2=0,size2;
 
 	for(int i=0; i<100; i++) {
 		if ( node_bitmap[i]==1 && strcmp(path, nodes[i].path) == 0 ) {
 			len = nodes[i].size;
-			if (offset < len) {
-				if (offset + size > len) {
-					size = len - offset;
+			size2 = block_size;
+			fileblock = nodes[i].start;
+
+			while (offset2 < len) {	
+				if (offset2 + block_size > len){
+					size2 = len - offset2;
 				}
-				memcpy(buf, nodes[i].start + offset, size);
-			} else{
-				size = 0;			
-			}
+				
+				memcpy(buf + offset2, fileblock , size2);
+				fileblock = fileblock->next_block;
+				offset2+=size2;
+			}			
+			return size;
 		}
 	}
-
-	return size;
+	return -ENOENT;
 }
 
 
