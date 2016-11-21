@@ -301,24 +301,6 @@ static int hello_mkdir(const char *path, mode_t mode)
 {
 	return 0;
 }
-static int hello_unlink(const char *path)
-{
-	return 0;
-}
-static int hello_rmdir(const char *path)
-{
-	return 0;
-}
-static int hello_rename(const char *path, const char *newpath)
-{
-	for(int i = 0; i < f.nnodes; i++) {
-		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
-			strcpy(f.nodes[i].path, newpath);
-			return 0;
-		}
-	}
-	return -ENOENT;
-}
 
 static int free_block(int index)
 {
@@ -336,20 +318,53 @@ static int hello_truncate(const char *path, off_t offset)
 	for(int i = 0; i < f.nnodes; i++) {
 		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
 			start = f.nodes[i].start_block;
-			f.nodes[i].start_block = -1;
 			while ( start != -1 ) {
 				start = free_block(start);
 			}
+			f.nodes[i].start_block = -1;
 			f.nodes[i].size = 0;
 			return 0;	
 		}
 	}
 	return -ENOENT;
 }
+
+static int hello_unlink(const char *path)
+{
+	int status = hello_truncate(path, 0);
+	if (status < 0) {
+		return status;
+	}
+	for(int i = 0; i < f.nnodes; i++) {
+		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
+			f.nodes[i].start_block = -1;
+			f.nodes[i].size = 0;
+			f.nodes[i].status = unused;
+		}
+	}
+
+	return 0;
+}
+static int hello_rmdir(const char *path)
+{
+	return 0;
+}
+static int hello_rename(const char *path, const char *newpath)
+{
+	for(int i = 0; i < f.nnodes; i++) {
+		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
+			strcpy(f.nodes[i].path, newpath);
+			return 0;
+		}
+	}
+	return -ENOENT;
+}
+
 static int hello_opendir(const char *path, struct fuse_file_info *f)
 {
 	return 0;
 }
+
 static int hello_flush(const char *path, struct fuse_file_info *f)
 {
 	return 0;
