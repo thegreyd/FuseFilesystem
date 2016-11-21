@@ -1,7 +1,7 @@
 hello: hello.c
 	echo "gcc -Wall hello.c `pkg-config fuse --cflags --libs` -o hello" | bash
 clean:	
-	rm -f hello
+	rm -f hello ramdisk.save
 mount:
 	./hello -d /tmp/fu/
 unmount:
