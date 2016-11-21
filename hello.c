@@ -297,15 +297,81 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 	return -ENOENT;
 }
 
+static int hello_mkdir(const char *path, mode_t mode)
+{
+	return 0;
+}
+static int hello_unlink(const char *path)
+{
+	return 0;
+}
+static int hello_rmdir(const char *path)
+{
+	return 0;
+}
+static int hello_rename(const char *path, const char *newpath)
+{
+	for(int i = 0; i < f.nnodes; i++) {
+		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
+			strcpy(f.nodes[i].path, newpath);
+			return 0;
+		}
+	}
+	return -ENOENT;
+}
+
+static int free_block(int index)
+{
+	int next;
+	f.blocks[index].status = unusedblock;
+	next = f.blocks[index].next_block;
+	f.blocks[index].next_block = -1;
+	return next;
+}
+
+static int hello_truncate(const char *path, off_t offset)
+{
+	// truncates to zero
+	int start;
+	for(int i = 0; i < f.nnodes; i++) {
+		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
+			start = f.nodes[i].start_block;
+			f.nodes[i].start_block = -1;
+			while ( start != -1 ) {
+				start = free_block(start);
+			}
+			f.nodes[i].size = 0;
+			return 0;	
+		}
+	}
+	return -ENOENT;
+}
+static int hello_opendir(const char *path, struct fuse_file_info *f)
+{
+	return 0;
+}
+static int hello_flush(const char *path, struct fuse_file_info *f)
+{
+	return 0;
+}
+
+
 static struct fuse_operations hello_oper = {
 	.getattr	= hello_getattr,
 	.readdir	= hello_readdir,
+	.opendir	= hello_opendir,
+	.mkdir		= hello_mkdir,
+	.rmdir		= hello_rmdir,
+	.create		= hello_create,
+	.truncate 	= hello_truncate,
 	.open		= hello_open,
 	.read		= hello_read,
-	.create		= hello_create,
 	.write 		= hello_write,
+	.unlink		= hello_unlink,
+	.flush		= hello_flush,
 	.init 		= hello_init,
-	.destroy 	= hello_destroy
+	.destroy 	= hello_destroy,
+	.rename 	= hello_rename
 };
 
 int main(int argc, char *argv[])
