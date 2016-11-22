@@ -3,31 +3,31 @@
 #define NBLOCKS 200
 #define NNODES 200
 
-typedef enum {usedblock, lastblock, unusedblock} block_status;
+typedef enum {usedblock, unusedblock} block_status;
 typedef enum {used, unused} node_status;
 
 typedef struct
 {
-	block_status status;// = unusedblock;
+	block_status status;
 	char data[BLOCK_SIZE];
-	int next_block;// = -1;
+	int next_block;
 } block;
 
 typedef struct 
 {
-	node_status status;// = unused;
+	node_status status;
 	char path[PATH_MAX];
-	int is_dir;// = 0;
+	int is_dir;
 	mode_t mode;
-	size_t size;// = 0;
-	int start_block;// = -1;
+	size_t size;
+	int start_block;
 } node;
 
 typedef struct 
 {
-	size_t block_size;// = BLOCK_SIZE;
-	size_t nblocks;// = NBLOCKS;
-	size_t nnodes;// = NNODES;
+	size_t block_size;
+	size_t nblocks;
+	size_t nnodes;
 	node* nodes;
 	block* blocks;
 	int* block_bitmap;
