@@ -1,7 +1,5 @@
-#define BLOCK_SIZE 4
-#define PATH_MAX 1024
-#define NBLOCKS 200
-#define NNODES 200
+#define PATH_MAX 256
+#define BLOCK_SIZE 4096
 
 typedef enum {usedblock, unusedblock} block_status;
 typedef enum {used, unused} node_status;
