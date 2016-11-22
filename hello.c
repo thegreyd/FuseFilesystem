@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include "rdstructs.h"
 
+int NNODES;
+int NBLOCKS;
 FILE *fp;
 char *filename = "ramdisk.save";
 
@@ -25,7 +27,6 @@ filesystem f;
 
 void nodes_init()
 {
-	printf("----------nodes init\n");
 	for (int i = 0; i < f.nnodes; i++) {
 		f.nodes[i].status = unused;
 		f.nodes[i].size = 0;
@@ -36,11 +37,21 @@ void nodes_init()
 
 void blocks_init()
 {
-	printf("----------blocks init\n");
 	for (int i = 0; i < f.nblocks; i++) {
 		f.blocks[i].status = unusedblock;
 		f.blocks[i].next_block = -1;
 	}
+}
+
+int path_search(const char *path)
+{
+	for (int i = 0; i < f.nnodes; i++) {
+		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0) {
+			return i;
+		}
+	}
+
+	return -ENOENT;
 }
 
 int print_info()
@@ -52,7 +63,7 @@ int print_info()
 			start = f.nodes[i].start_block;
 			j = 0;
 			while(start!=-1) {
-				printf("blockindex: %d status: %d content: %s\n", start,f.blocks[start].status, f.blocks[start].data);
+			//	printf("blockindex: %d status: %d content: %s\n", start,f.blocks[start].status, f.blocks[start].data);
 				start = f.blocks[start].next_block;	
 				j+=1;
 			}
@@ -69,12 +80,12 @@ int print_info()
 	printf("Blocks: ");
 	for(int i = 0; i < f.nblocks; i++) {
 		if ( f.blocks[i].status == usedblock ) {
-			printf("%d, ", i);
+			//printf("%d, ", i);
 			j+=1;
 		}
 	}
 	printf("\n------Total Blocks: %d----------\n\n",j);
-	
+
 	return 0;
 }
 
@@ -87,7 +98,7 @@ node* get_free_node()
 		}
 	}
 	perror("No more nodes left!!");
-	exit(0);
+	return NULL;
 }
 
 int get_free_block_index()
@@ -99,12 +110,11 @@ int get_free_block_index()
 		}
 	}
 	perror("No more blocks left!!");
-	exit(0);
+	return -1;
 }
 
 void* hello_init(struct fuse_conn_info *conn) 
 {
-	printf("--------------init\n");
 	f.block_size = BLOCK_SIZE;
 	f.nnodes = NNODES;
 	f.nblocks = NBLOCKS;
@@ -112,7 +122,6 @@ void* hello_init(struct fuse_conn_info *conn)
 	f.nodes = (node *) malloc(f.nnodes*sizeof(node));
 	f.blocks = (block *) malloc(f.nblocks*sizeof(block));
 	
-	printf("--------------ReadingFromDisk\n");
 	fp = fopen(filename, "r");
 	if (fp != NULL) {
 		fread(f.nodes, sizeof(node), f.nnodes, fp);
@@ -129,7 +138,6 @@ void* hello_init(struct fuse_conn_info *conn)
 
 void hello_destroy(void *v)
 {
-	printf("--------------WritingToDisk\n");
 	fp = fopen(filename, "w");
 	if (fp != NULL) {
 		fwrite(f.nodes, sizeof(node), f.nnodes, fp);
@@ -140,7 +148,6 @@ void hello_destroy(void *v)
 		perror("Couldn't open file in write mode");
 	}
 	
-	printf("--------------destroy\n");
 	free(f.nodes);
 	free(f.blocks);
 } 
@@ -155,16 +162,14 @@ static int hello_getattr(const char *path, struct stat *stbuf)
 		return 0;
 	} 
 	
-	for (int i = 0; i < f.nnodes; i++) {
-		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0) {
-			stbuf->st_mode = f.nodes[i].mode;
-			stbuf->st_nlink = 1;
-			stbuf->st_size = f.nodes[i].size;		
-			return 0;
-		}
-	}
-	
-	return -ENOENT;
+	int i = path_search(path);
+	if ( i < 0 )
+		return i;
+
+	stbuf->st_mode = f.nodes[i].mode;
+	stbuf->st_nlink = 1;
+	stbuf->st_size = f.nodes[i].size;		
+	return 0;
 }
 
 static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
@@ -192,25 +197,27 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 static int hello_open(const char *path, struct fuse_file_info *fi)
 {
-	for (int i = 0; i < f.nnodes; i++) {
-		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0) {
-			return 0;
-		}
+	if ( path_search(path) == -1 ){
+		return -ENOENT;	
 	}
-	//if ((fi->flags & 3) != O_RDONLY)
-	//	return -EACCES;
-	return -ENOENT;
+	return 0;
 }
 
 static int hello_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 {
 	//open file if it exists. if not the create and open file
-	if ( hello_open(path, fi) == -ENOENT ) {
+	if ( path_search(path) == -ENOENT ) {
 		//file doesn't exist
 		node* file;
 		file = get_free_node();
+		if (file == NULL) {
+			perror("Cannot create: No space left!");
+			return -1;
+		}
+		
 		file->mode = mode;
-		strcpy(file->path, path);
+		strcpy(file->path, path);	
+		
 	}
 	
 	return 0;
@@ -220,116 +227,119 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	//return number of bytes read
-	(void) fi;
+	int fileblock, size2,i;
+
+	i = path_search(path);
+	if ( i < 0 )
+		return i;
 	
-	int fileblock, size2;
-
-	for(int i = 0; i < f.nnodes; i++) {
-		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
-			
-			if ( size > f.nodes[i].size ) {
-				// cant read more than the size of file
-				size = f.nodes[i].size;
-			}
-
-			size2 = f.block_size;
-			fileblock = f.nodes[i].start_block;
-			
-			if ( fileblock == -1 )
-				return 0;
-			
-			//seek to the offset with fileblock pointer
-			while ( offset-size2 > 0 ) {
-				fileblock = f.blocks[fileblock].next_block;
-				offset -= size2;
-			}
-
-			// start actual read
-			
-			// read partial block
-			if ( offset > 0 ) {
-				memcpy(buf, f.blocks[fileblock].data + offset , size2-offset);
-				fileblock = f.blocks[fileblock].next_block;
-			}
-			
-			// read all other whole blocks
-			while ( offset < size ) {	
-				if ( offset + size2 > size ){
-					size2 = size - offset;
-				}
-
-				if ( fileblock == -1 ) {
-					printf("read_error:this is not supposed to happen\n");
-					exit(0);
-				}
-				
-				memcpy(buf + offset, f.blocks[fileblock].data , size2);
-				fileblock = f.blocks[fileblock].next_block;
-				offset += size2;
-			}			
-			return size;
-		}
+	if ( size > f.nodes[i].size ) {
+		// cant read more than the size of file
+		size = f.nodes[i].size;
 	}
-	return -ENOENT;
+
+	size2 = f.block_size;
+	fileblock = f.nodes[i].start_block;
+	
+	if ( fileblock == -1 )
+		return 0;
+	
+	//seek to the offset with fileblock pointer
+	while ( offset-size2 > 0 ) {
+		fileblock = f.blocks[fileblock].next_block;
+		offset -= size2;
+	}
+
+	// start actual read
+	
+	// read partial block
+	if ( offset > 0 ) {
+		memcpy(buf, f.blocks[fileblock].data + offset , size2-offset);
+		fileblock = f.blocks[fileblock].next_block;
+	}
+	
+	// read all other whole blocks
+	while ( offset < size ) {	
+		if ( offset + size2 > size ){
+			size2 = size - offset;
+		}
+
+		if ( fileblock == -1 ) {
+			printf("read_error:this is not supposed to happen\n");
+			exit(0);
+		}
+		
+		memcpy(buf + offset, f.blocks[fileblock].data , size2);
+		fileblock = f.blocks[fileblock].next_block;
+		offset += size2;
+	}			
+	return size;
 }
 
 static int hello_write(const char *path, const char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	//return number of bytes written
-	int fileblock, last, size2;
-	for(int i=0; i<f.nnodes; i++) {
-		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
+	int fileblock, last, size2, i;
+	i = path_search(path);
+	if ( i < 0 )
+		return i;
 			
-			f.nodes[i].size = offset;
-			size2 = f.block_size;
-			fileblock = f.nodes[i].start_block;
+	f.nodes[i].size = offset;
+	size2 = f.block_size;
+	fileblock = f.nodes[i].start_block;
 
-			// file is new, link a block
-			if ( fileblock == -1 && size > 0) {
-				fileblock = get_free_block_index();
-				f.nodes[i].start_block = fileblock;
-			}
-
-			//seek to the offset with fileblock pointer
-			while ( offset-size2 > 0 ) {
-				fileblock = f.blocks[fileblock].next_block;
-				offset -= size2;
-			}
-
-			// start actual write
-			
-			// write partial block
-			if ( offset > 0 ) {
-				memcpy(f.blocks[fileblock].data + offset, buf, size2-offset);
-				last = fileblock;
-				fileblock = f.blocks[fileblock].next_block;
-				offset = size2 - offset;
-			}
-
-			// write to all other whole blocks
-			while ( offset < size ) {	
-				if ( offset + size2 > size ) {
-					size2 = size - offset;
-				}
-				
-				if ( fileblock == -1 ) {
-					fileblock = get_free_block_index();
-					f.blocks[last].next_block = fileblock;
-				}
-
-				memcpy(f.blocks[fileblock].data, buf + offset , size2);
-				last = fileblock;
-				fileblock = f.blocks[fileblock].next_block;
-				offset += size2;
-			}
-			
-			f.nodes[i].size += size;
-			
-			return size;	 
+	// file is new, link a block
+	if ( fileblock == -1 && size > 0) {
+		fileblock = get_free_block_index();
+		if (fileblock == -1) {
+			perror("Cannot write: No space left!");
+			f.nodes[i].size = 0;
+			return 0;
 		}
+		f.nodes[i].start_block = fileblock;
 	}
-	return -ENOENT;
+
+	//seek to the offset with fileblock pointer
+	while ( offset-size2 > 0 ) {
+		fileblock = f.blocks[fileblock].next_block;
+		offset -= size2;
+	}
+
+	// start actual write
+	
+	// write partial block
+	if ( offset > 0 ) {
+		memcpy(f.blocks[fileblock].data + offset, buf, size2-offset);
+		last = fileblock;
+		fileblock = f.blocks[fileblock].next_block;
+		offset = size2 - offset;
+	}
+
+	// write to all other whole blocks
+	while ( offset < size ) {	
+		if ( offset + size2 > size ) {
+			size2 = size - offset;
+		}
+		
+		if ( fileblock == -1 ) {
+			fileblock = get_free_block_index();
+			if (fileblock == -1) {
+				perror("Cannot write: No space left!");
+				break;
+			}
+			f.blocks[last].next_block = fileblock;
+		}
+
+		memcpy(f.blocks[fileblock].data, buf + offset , size2);
+		last = fileblock;
+		fileblock = f.blocks[fileblock].next_block;
+		offset += size2;
+	}
+	
+	f.nodes[i].size += offset;
+	
+	return offset;	 
 }
 
 static int hello_mkdir(const char *path, mode_t mode)
@@ -348,78 +358,78 @@ static int free_block(int index)
 
 static int hello_truncate(const char *path, off_t offset)
 {
-	int fileblock, size2;
+	int fileblock, size2, i;
 
-	for(int i = 0; i < f.nnodes; i++) {
-		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
-			if ( offset >= f.nodes[i].size ) {
-				//see man 2 truncate, if offset > size then fill with /0 characters
-				return 0;
-			}
-
-			size2 = f.block_size;
-			fileblock = f.nodes[i].start_block;
+	i = path_search(path);
+	if ( i < 0 )
+		return i;
 			
-			//seek to the offset
-			while ( offset-size2 > 0 ) {
-				fileblock = f.blocks[fileblock].next_block;
-				offset -= size2;
-			}
-
-			// start actual truncate
-
-			// truncate partial block
-			if ( offset > 0 ) {
-				memset(f.blocks[fileblock].data + offset, '\0', size2-offset);
-				fileblock = f.blocks[fileblock].next_block;
-				offset = size2 - offset;
-			}
-			
-			//truncate whole blocks
-			while ( fileblock != -1 ) {
-				fileblock = free_block(fileblock);
-			}
-			
-			if (offset == 0) {
-				f.nodes[i].start_block = -1;	
-			}
-			
-			f.nodes[i].size = offset;
-			return 0;	
-		}
+	if ( offset >= f.nodes[i].size ) {
+		//see man 2 truncate, if offset > size then fill with /0 characters
+		return 0;
 	}
-	return -ENOENT;
+
+	size2 = f.block_size;
+	fileblock = f.nodes[i].start_block;
+	
+	//seek to the offset
+	while ( offset-size2 > 0 ) {
+		fileblock = f.blocks[fileblock].next_block;
+		offset -= size2;
+	}
+
+	// start actual truncate
+
+	// truncate partial block
+	if ( offset > 0 ) {
+		memset(f.blocks[fileblock].data + offset, '\0', size2-offset);
+		fileblock = f.blocks[fileblock].next_block;
+		offset = size2 - offset;
+	}
+	
+	//truncate whole blocks
+	while ( fileblock != -1 ) {
+		fileblock = free_block(fileblock);
+	}
+	
+	if (offset == 0) {
+		f.nodes[i].start_block = -1;	
+	}
+	
+	f.nodes[i].size = offset;
+	return 0;	
 }
 
 static int hello_unlink(const char *path)
 {
-	int status = hello_truncate(path, 0);
+	int status, i;
+	
+	status = hello_truncate(path, 0);
 	if (status < 0) {
 		return status;
 	}
-	for(int i = 0; i < f.nnodes; i++) {
-		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
-			f.nodes[i].start_block = -1;
-			f.nodes[i].size = 0;
-			f.nodes[i].status = unused;
-		}
-	}
-
+	
+	i = path_search(path);		
+	f.nodes[i].start_block = -1;
+	f.nodes[i].size = 0;
+	f.nodes[i].status = unused;
+		
 	return 0;
 }
+
 static int hello_rmdir(const char *path)
 {
 	return 0;
 }
+
 static int hello_rename(const char *path, const char *newpath)
 {
-	for(int i = 0; i < f.nnodes; i++) {
-		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
-			strcpy(f.nodes[i].path, newpath);
-			return 0;
-		}
-	}
-	return -ENOENT;
+	int i = path_search(path);
+	if ( i < 0 )
+		return i;
+	
+	strcpy(f.nodes[i].path, newpath);
+	return 0;
 }
 
 static int hello_opendir(const char *path, struct fuse_file_info *f)
@@ -453,5 +463,20 @@ static struct fuse_operations hello_oper = {
 
 int main(int argc, char *argv[])
 {
+	if (argc < 3) {
+		fprintf(stderr, "Usage: %s <mount-directory> <sizeinMB>\n", argv[0]);
+		return -1;
+	}
+
+	size_t size_bytes = atoi(argv[2])*1000000;
+	NBLOCKS = size_bytes/(sizeof(node) + sizeof(block));
+	NNODES = NBLOCKS;
+	size_t storage = NBLOCKS*sizeof(block);
+	printf("number of blocks: %d\n", NBLOCKS);
+	printf("number of nodes: %d\n", NNODES);
+	printf("Total space for storage: %lu\n", storage);
+
+	argv[2] = argv[1];
+	argv[1] = "-d";
 	return fuse_main(argc, argv, &hello_oper, NULL);
 }
