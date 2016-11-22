@@ -72,14 +72,9 @@ int print_info()
 			printf("%d, ", i);
 			j+=1;
 		}
-		else if ( f.blocks[i].status == lastblock ) {
-			printf("Last%d, ", i);
-			j+=1;
-		}
 	}
 	printf("\n------Total Blocks: %d----------\n\n",j);
 	
-
 	return 0;
 }
 
@@ -225,30 +220,54 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	//return number of bytes read
-	size_t len, offset2=0;
 	(void) fi;
 	
 	int fileblock, size2;
 
 	for(int i = 0; i < f.nnodes; i++) {
 		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
-			len = f.nodes[i].size;
+			
+			if ( size > f.nodes[i].size ) {
+				// cant read more than the size of file
+				size = f.nodes[i].size;
+			}
+
 			size2 = f.block_size;
 			fileblock = f.nodes[i].start_block;
 			
-			if (fileblock == -1)
+			if ( fileblock == -1 )
 				return 0;
 			
-			while ( offset2 < len ) {	
-				if ( offset2 + size2 > len ){
-					size2 = len - offset2;
+			//seek to the offset with fileblock pointer
+			while ( offset-size2 > 0 ) {
+				fileblock = f.blocks[fileblock].next_block;
+				offset -= size2;
+			}
+
+			// start actual read
+			
+			// read partial block
+			if ( offset > 0 ) {
+				memcpy(buf, f.blocks[fileblock].data + offset , size2-offset);
+				fileblock = f.blocks[fileblock].next_block;
+			}
+			
+			// read all other whole blocks
+			while ( offset < size ) {	
+				if ( offset + size2 > size ){
+					size2 = size - offset;
+				}
+
+				if ( fileblock == -1 ) {
+					printf("read_error:this is not supposed to happen\n");
+					exit(0);
 				}
 				
-				memcpy(buf + offset2, &f.blocks[fileblock].data , size2);
+				memcpy(buf + offset, f.blocks[fileblock].data , size2);
 				fileblock = f.blocks[fileblock].next_block;
-				offset2 += size2;
+				offset += size2;
 			}			
-			return offset2;
+			return size;
 		}
 	}
 	return -ENOENT;
@@ -258,22 +277,40 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 		      struct fuse_file_info *fi)
 {
 	//return number of bytes written
-	size_t offset2 = 0;
 	int fileblock, last, size2;
-	
 	for(int i=0; i<f.nnodes; i++) {
 		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
+			
+			f.nodes[i].size = offset;
 			size2 = f.block_size;
 			fileblock = f.nodes[i].start_block;
 
-			if (fileblock == -1) {
+			// file is new, link a block
+			if ( fileblock == -1 && size > 0) {
 				fileblock = get_free_block_index();
 				f.nodes[i].start_block = fileblock;
 			}
 
-			while ( offset2 < size ) {	
-				if ( offset2 + size2 > size ) {
-					size2 = size - offset2;
+			//seek to the offset with fileblock pointer
+			while ( offset-size2 > 0 ) {
+				fileblock = f.blocks[fileblock].next_block;
+				offset -= size2;
+			}
+
+			// start actual write
+			
+			// write partial block
+			if ( offset > 0 ) {
+				memcpy(f.blocks[fileblock].data + offset, buf, size2-offset);
+				last = fileblock;
+				fileblock = f.blocks[fileblock].next_block;
+				offset = size2 - offset;
+			}
+
+			// write to all other whole blocks
+			while ( offset < size ) {	
+				if ( offset + size2 > size ) {
+					size2 = size - offset;
 				}
 				
 				if ( fileblock == -1 ) {
@@ -281,17 +318,15 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 					f.blocks[last].next_block = fileblock;
 				}
 
-				memcpy(&f.blocks[fileblock].data, buf + offset2 , size2);
-				
+				memcpy(f.blocks[fileblock].data, buf + offset , size2);
 				last = fileblock;
 				fileblock = f.blocks[fileblock].next_block;
-				offset2 += size2;
+				offset += size2;
 			}
-
-			f.blocks[last].status = lastblock;
-			f.nodes[i].size = offset2;
 			
-			return offset2;	 
+			f.nodes[i].size += size;
+			
+			return size;	 
 		}
 	}
 	return -ENOENT;
@@ -313,16 +348,43 @@ static int free_block(int index)
 
 static int hello_truncate(const char *path, off_t offset)
 {
-	// truncates to zero
-	int start;
+	int fileblock, size2;
+
 	for(int i = 0; i < f.nnodes; i++) {
 		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0 ) {
-			start = f.nodes[i].start_block;
-			while ( start != -1 ) {
-				start = free_block(start);
+			if ( offset >= f.nodes[i].size ) {
+				//see man 2 truncate, if offset > size then fill with /0 characters
+				return 0;
 			}
-			f.nodes[i].start_block = -1;
-			f.nodes[i].size = 0;
+
+			size2 = f.block_size;
+			fileblock = f.nodes[i].start_block;
+			
+			//seek to the offset
+			while ( offset-size2 > 0 ) {
+				fileblock = f.blocks[fileblock].next_block;
+				offset -= size2;
+			}
+
+			// start actual truncate
+
+			// truncate partial block
+			if ( offset > 0 ) {
+				memset(f.blocks[fileblock].data + offset, '\0', size2-offset);
+				fileblock = f.blocks[fileblock].next_block;
+				offset = size2 - offset;
+			}
+			
+			//truncate whole blocks
+			while ( fileblock != -1 ) {
+				fileblock = free_block(fileblock);
+			}
+			
+			if (offset == 0) {
+				f.nodes[i].start_block = -1;	
+			}
+			
+			f.nodes[i].size = offset;
 			return 0;	
 		}
 	}
