@@ -16,12 +16,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <fnmatch.h>
 #include "rdstructs.h"
 
 int NNODES;
 int NBLOCKS;
 FILE *fp;
 char *filename = "ramdisk.save";
+char a_path[PATH_MAX];
 
 filesystem f;
 
@@ -152,6 +154,13 @@ void hello_destroy(void *v)
 	free(f.blocks);
 } 
 
+int pathmatch(const char *dir, const char *path)
+{
+	strcpy(a_path, dir);
+	strcat(a_path, "/*");
+	return fnmatch(a_path, path, FNM_PATHNAME);
+}
+
 static int hello_getattr(const char *path, struct stat *stbuf)
 {
 
@@ -159,6 +168,7 @@ static int hello_getattr(const char *path, struct stat *stbuf)
 	if (strcmp(path, "/") == 0) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
+		stbuf->st_size = f.block_size;
 		return 0;
 	} 
 	
@@ -177,16 +187,29 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 {
 	(void) offset;
 	(void) fi;
+	int i,index = -1;
+	char *dirpath = "";
+	
+	if (strcmp(path, "/") != 0 ) {
+		for (i = 0; i < f.nnodes; i++) {
+			if ( f.nodes[i].is_dir == 1 && f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0) {
+				index = i;
+				dirpath = f.nodes[i].path;
+				break;
+			}
+		}
 
-	if (strcmp(path, "/") != 0)
-		return -ENOENT;
-
+		if (index == -1)
+			return -ENOENT;
+	
+	}
+	
 	filler(buf, ".", NULL, 0);
 	filler(buf, "..", NULL, 0);
 
-	for (int i = 0; i < f.nnodes; i++) {
-		if ( f.nodes[i].status == used ) {
-			filler(buf, f.nodes[i].path+1, NULL, 0);
+	for (i = 0; i < f.nnodes; i++) {
+		if ( f.nodes[i].status == used && pathmatch(dirpath, f.nodes[i].path) == 0 ) {
+			filler(buf, strrchr(f.nodes[i].path, '/')+1 , NULL, 0);//rindex(f.nodes[i].path, '/')
 		}
 	}
 
@@ -211,8 +234,8 @@ static int hello_create(const char *path, mode_t mode, struct fuse_file_info *fi
 		node* file;
 		file = get_free_node();
 		if (file == NULL) {
-			perror("Cannot create: No space left!");
-			return -1;
+			perror("Cannot create file: No nodes left.");
+			return -EDQUOT;
 		}
 		
 		file->mode = mode;
@@ -265,8 +288,8 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 		}
 
 		if ( fileblock == -1 ) {
-			printf("read_error:this is not supposed to happen\n");
-			exit(0);
+			perror("read_error:this is not supposed to happen\n");
+			break;
 		}
 		
 		memcpy(buf + offset, f.blocks[fileblock].data , size2);
@@ -293,9 +316,9 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 	if ( fileblock == -1 && size > 0) {
 		fileblock = get_free_block_index();
 		if (fileblock == -1) {
-			perror("Cannot write: No space left!");
+			perror("Cannot write to file: No space left.");
 			f.nodes[i].size = 0;
-			return 0;
+			return -EDQUOT;
 		}
 		f.nodes[i].start_block = fileblock;
 	}
@@ -325,7 +348,8 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 		if ( fileblock == -1 ) {
 			fileblock = get_free_block_index();
 			if (fileblock == -1) {
-				perror("Cannot write: No space left!");
+				perror("Cannot write to file: No space left.");
+				errno = -EDQUOT;
 				break;
 			}
 			f.blocks[last].next_block = fileblock;
@@ -344,7 +368,23 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 
 static int hello_mkdir(const char *path, mode_t mode)
 {
-	return 0;
+	if ( path_search(path) == -ENOENT) {
+		//directory doesn't exist
+		node* dir;
+		dir = get_free_node();
+		if (dir == NULL) {
+			perror("Cannot create directory: No space left.");
+			return -EDQUOT;
+		}
+		
+		dir->is_dir = 1;
+		dir->mode = S_IFDIR|mode;
+		dir->size = f.block_size;
+		strcpy(dir->path, path);	
+		return 0;
+	}
+	
+	return -EEXIST;
 }
 
 static int free_block(int index)
@@ -411,7 +451,6 @@ static int hello_unlink(const char *path)
 	
 	i = path_search(path);		
 	f.nodes[i].start_block = -1;
-	f.nodes[i].size = 0;
 	f.nodes[i].status = unused;
 		
 	return 0;
@@ -419,7 +458,33 @@ static int hello_unlink(const char *path)
 
 static int hello_rmdir(const char *path)
 {
+	int i, j, index = -1;
+	
+	if (strcmp(path, "/") == 0) {
+		return -EACCES;
+	}
+
+	for (i = 0; i < f.nnodes; i++) {
+		if ( f.nodes[i].is_dir == 1 && f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0) {
+			index = i;
+			break;
+		}
+	}
+
+	if ( index == -1 ) {
+		return -ENOENT;
+	}
+
+	for (j = 0; j < f.nnodes; j++) {
+		if ( f.nodes[j].status == used && f.nodes[j].is_dir == 0 && pathmatch(path, f.nodes[j].path) == 0 ) {
+			return -ENOTEMPTY;
+		}
+	}
+
+	f.nodes[i].status = unused;
+		
 	return 0;
+
 }
 
 static int hello_rename(const char *path, const char *newpath)
@@ -427,14 +492,28 @@ static int hello_rename(const char *path, const char *newpath)
 	int i = path_search(path);
 	if ( i < 0 )
 		return i;
+
+	if (path_search(newpath) >= 0) {
+		hello_unlink(newpath);
+	}
 	
 	strcpy(f.nodes[i].path, newpath);
 	return 0;
 }
 
-static int hello_opendir(const char *path, struct fuse_file_info *f)
+static int hello_opendir(const char *path, struct fuse_file_info *fu)
 {
-	return 0;
+	if (strcmp("/", path) == 0) {
+		return 0;
+	}
+
+	for (int i = 0; i < f.nnodes; i++) {
+		if ( f.nodes[i].is_dir == 1 && f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0) {
+			return 0;
+		}
+	}
+
+	return -ENOENT;
 }
 
 static int hello_flush(const char *path, struct fuse_file_info *f)
@@ -472,9 +551,9 @@ int main(int argc, char *argv[])
 	NBLOCKS = size_bytes/(sizeof(node) + sizeof(block));
 	NNODES = NBLOCKS;
 	size_t storage = NBLOCKS*sizeof(block);
-	printf("number of blocks: %d\n", NBLOCKS);
-	printf("number of nodes: %d\n", NNODES);
-	printf("Total space for storage: %lu\n", storage);
+	fprintf(stderr,"number of blocks: %d\n", NBLOCKS);
+	fprintf(stderr,"number of nodes: %d\n", NNODES);
+	fprintf(stderr,"Total space for storage: %lu\n", storage);
 
 	argv[2] = argv[1];
 	argv[1] = "-d";
