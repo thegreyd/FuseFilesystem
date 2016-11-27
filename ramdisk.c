@@ -21,15 +21,17 @@
 
 int NNODES;
 int NBLOCKS;
+int persistent = 0;
 FILE *fp;
-char *filename = "ramdisk.save";
+char filename[PATH_MAX];
 char a_path[PATH_MAX];
 
 filesystem f;
 
 void nodes_init()
 {
-	for (int i = 0; i < f.nnodes; i++) {
+	int i;
+	for (i = 0; i < f.nnodes; i++) {
 		f.nodes[i].status = unused;
 		f.nodes[i].size = 0;
 		f.nodes[i].start_block = -1;
@@ -39,7 +41,8 @@ void nodes_init()
 
 void blocks_init()
 {
-	for (int i = 0; i < f.nblocks; i++) {
+	int i;
+	for (i = 0; i < f.nblocks; i++) {
 		f.blocks[i].status = unusedblock;
 		f.blocks[i].next_block = -1;
 	}
@@ -47,7 +50,8 @@ void blocks_init()
 
 int path_search(const char *path)
 {
-	for (int i = 0; i < f.nnodes; i++) {
+	int i;
+	for (i = 0; i < f.nnodes; i++) {
 		if ( f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0) {
 			return i;
 		}
@@ -58,8 +62,8 @@ int path_search(const char *path)
 
 int print_info()
 {
-	int j, start, k=0, h=0;
-	for(int i = 0; i < f.nnodes; i++) {
+	int j, i, start, k=0, h=0;
+	for(i = 0; i < f.nnodes; i++) {
 		if ( f.nodes[i].status == used ) {
 			printf("\n\n------File: %s---------\n", f.nodes[i].path);
 			start = f.nodes[i].start_block;
@@ -80,7 +84,7 @@ int print_info()
 	j = 0;
 	printf("\n\n------Reading Blocks---\n");
 	printf("Blocks: ");
-	for(int i = 0; i < f.nblocks; i++) {
+	for(i= 0; i < f.nblocks; i++) {
 		if ( f.blocks[i].status == usedblock ) {
 			//printf("%d, ", i);
 			j+=1;
@@ -93,7 +97,8 @@ int print_info()
 
 node* get_free_node()
 {
-	for (int i = 0; i < f.nnodes; i++) {
+	int i;
+	for (i = 0; i < f.nnodes; i++) {
 		if ( f.nodes[i].status == unused ){
 			f.nodes[i].status = used;
 			return &f.nodes[i];
@@ -105,7 +110,8 @@ node* get_free_node()
 
 int get_free_block_index()
 {
-	for (int i = 0; i < f.nblocks; i++) {
+	int i;
+	for (i = 0; i < f.nblocks; i++) {
 		if ( f.blocks[i].status == unusedblock ){
 			f.blocks[i].status = usedblock;
 			return i;
@@ -493,21 +499,24 @@ static int hello_rename(const char *path, const char *newpath)
 	if ( i < 0 )
 		return i;
 
-	if (path_search(newpath) >= 0) {
+	int j = path_search(newpath);
+	if ( j>= 0 && f.nodes[j].is_dir == 0) {
 		hello_unlink(newpath);
-	}
+	}	
 	
+	if 
 	strcpy(f.nodes[i].path, newpath);
 	return 0;
 }
 
 static int hello_opendir(const char *path, struct fuse_file_info *fu)
 {
+	int i;
 	if (strcmp("/", path) == 0) {
 		return 0;
 	}
 
-	for (int i = 0; i < f.nnodes; i++) {
+	for (i = 0; i < f.nnodes; i++) {
 		if ( f.nodes[i].is_dir == 1 && f.nodes[i].status == used && strcmp(path, f.nodes[i].path) == 0) {
 			return 0;
 		}
@@ -520,7 +529,6 @@ static int hello_flush(const char *path, struct fuse_file_info *f)
 {
 	return 0;
 }
-
 
 static struct fuse_operations hello_oper = {
 	.getattr	= hello_getattr,
@@ -543,17 +551,24 @@ static struct fuse_operations hello_oper = {
 int main(int argc, char *argv[])
 {
 	if (argc < 3) {
-		fprintf(stderr, "Usage: %s <mount-directory> <sizeinMB>\n", argv[0]);
+		fprintf(stderr, "Usage: %s <mount-directory> <sizeinMB> [<disk-image>]\n", argv[0]);
 		return -1;
+	}
+
+	if (argc == 4) {
+		strcpy(filename, argv[3]);
+		persistent = 1;
+		argc-=1;
 	}
 
 	size_t size_bytes = atoi(argv[2])*1000000;
 	NBLOCKS = size_bytes/(sizeof(node) + sizeof(block));
 	NNODES = NBLOCKS;
-	size_t storage = NBLOCKS*sizeof(block);
-	fprintf(stderr,"number of blocks: %d\n", NBLOCKS);
-	fprintf(stderr,"number of nodes: %d\n", NNODES);
-	fprintf(stderr,"Total space for storage: %lu\n", storage);
+	
+	//size_t storage = NBLOCKS*sizeof(block);
+	//fprintf(stderr,"number of blocks: %d\n", NBLOCKS);
+	//fprintf(stderr,"number of nodes: %d\n", NNODES);
+	//fprintf(stderr,"Total space for storage: %lu\n", storage);
 
 	argv[2] = argv[1];
 	argv[1] = "-d";
