@@ -1,4 +1,4 @@
 ramdisk: ramdisk.c rdstructs.h
-	gcc -Wall hello.c `pkg-config fuse --cflags --libs` -o ramdisk
+	echo "gcc -Wall ramdisk.c `pkg-config fuse --cflags --libs` -o ramdisk" | bash
 clean:	
 	rm -f ramdisk

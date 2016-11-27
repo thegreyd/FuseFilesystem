@@ -104,7 +104,7 @@ node* get_free_node()
 			return &f.nodes[i];
 		}
 	}
-	perror("No more nodes left!!");
+	//perror("No more nodes left!!");
 	return NULL;
 }
 
@@ -117,7 +117,7 @@ int get_free_block_index()
 			return i;
 		}
 	}
-	perror("No more blocks left!!");
+	//perror("No more blocks left!!");
 	return -1;
 }
 
@@ -130,30 +130,39 @@ void* hello_init(struct fuse_conn_info *conn)
 	f.nodes = (node *) malloc(f.nnodes*sizeof(node));
 	f.blocks = (block *) malloc(f.nblocks*sizeof(block));
 	
-	fp = fopen(filename, "r");
-	if (fp != NULL) {
-		fread(f.nodes, sizeof(node), f.nnodes, fp);
-		fread(f.blocks, sizeof(block), f.nblocks, fp);
+	if (persistent == 1) {
+		fp = fopen(filename, "r");
+		if (fp != NULL) {
+			fread(f.nodes, sizeof(node), f.nnodes, fp);
+			fread(f.blocks, sizeof(block), f.nblocks, fp);
+		}
+		else {
+			fp = fopen(filename, "w+");
+			nodes_init();
+			blocks_init();
+			fclose(fp);
+		}
 	}
 	else {
-		fp = fopen(filename, "w+");
 		nodes_init();
 		blocks_init();
 	}
-	fclose(fp);
+	
 	return &f;
 }
 
 void hello_destroy(void *v)
 {
-	fp = fopen(filename, "w");
-	if (fp != NULL) {
-		fwrite(f.nodes, sizeof(node), f.nnodes, fp);
-		fwrite(f.blocks, sizeof(block), f.nblocks, fp);
-		fclose(fp);
-	}
-	else {
-		perror("Couldn't open file in write mode");
+	if (persistent == 1) {
+		fp = fopen(filename, "w");
+		if (fp != NULL) {
+			fwrite(f.nodes, sizeof(node), f.nnodes, fp);
+			fwrite(f.blocks, sizeof(block), f.nblocks, fp);
+			fclose(fp);
+		}
+		else {
+			perror("Couldn't open file in write mode");
+		}
 	}
 	
 	free(f.nodes);
@@ -215,11 +224,11 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 	for (i = 0; i < f.nnodes; i++) {
 		if ( f.nodes[i].status == used && pathmatch(dirpath, f.nodes[i].path) == 0 ) {
-			filler(buf, strrchr(f.nodes[i].path, '/')+1 , NULL, 0);//rindex(f.nodes[i].path, '/')
+			filler(buf, strrchr(f.nodes[i].path, '/')+1 , NULL, 0);
 		}
 	}
 
-	print_info();
+	//print_info();
 
 	return 0;
 }
@@ -240,7 +249,7 @@ static int hello_create(const char *path, mode_t mode, struct fuse_file_info *fi
 		node* file;
 		file = get_free_node();
 		if (file == NULL) {
-			perror("Cannot create file: No nodes left.");
+			//perror("Cannot create file: No nodes left.");
 			return -EDQUOT;
 		}
 		
@@ -294,7 +303,7 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 		}
 
 		if ( fileblock == -1 ) {
-			perror("read_error:this is not supposed to happen\n");
+			//perror("read_error:this is not supposed to happen\n");
 			break;
 		}
 		
@@ -322,7 +331,7 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 	if ( fileblock == -1 && size > 0) {
 		fileblock = get_free_block_index();
 		if (fileblock == -1) {
-			perror("Cannot write to file: No space left.");
+			//perror("Cannot write to file: No space left.");
 			f.nodes[i].size = 0;
 			return -EDQUOT;
 		}
@@ -354,7 +363,7 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 		if ( fileblock == -1 ) {
 			fileblock = get_free_block_index();
 			if (fileblock == -1) {
-				perror("Cannot write to file: No space left.");
+				//perror("Cannot write to file: No space left.");
 				errno = -EDQUOT;
 				break;
 			}
@@ -379,7 +388,7 @@ static int hello_mkdir(const char *path, mode_t mode)
 		node* dir;
 		dir = get_free_node();
 		if (dir == NULL) {
-			perror("Cannot create directory: No space left.");
+			//perror("Cannot create directory: No space left.");
 			return -EDQUOT;
 		}
 		
@@ -495,17 +504,19 @@ static int hello_rmdir(const char *path)
 
 static int hello_rename(const char *path, const char *newpath)
 {
+	// works only for files and not directories
 	int i = path_search(path);
 	if ( i < 0 )
 		return i;
-
-	int j = path_search(newpath);
-	if ( j>= 0 && f.nodes[j].is_dir == 0) {
-		hello_unlink(newpath);
-	}	
 	
-	if 
-	strcpy(f.nodes[i].path, newpath);
+	if ( f.nodes[i].is_dir == 0) {
+		int j = path_search(newpath);
+		if ( j>= 0 && f.nodes[j].is_dir == 0) {
+			hello_unlink(newpath);
+		}	
+		strcpy(f.nodes[i].path, newpath);	
+	}
+	
 	return 0;
 }
 
