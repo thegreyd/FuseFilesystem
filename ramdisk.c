@@ -121,7 +121,7 @@ int get_free_block_index()
 	return -1;
 }
 
-void* hello_init(struct fuse_conn_info *conn) 
+int hello_init() 
 {
 	f.block_size = BLOCK_SIZE;
 	f.nnodes = NNODES;
@@ -135,6 +135,7 @@ void* hello_init(struct fuse_conn_info *conn)
 		if (fp != NULL) {
 			fread(f.nodes, sizeof(node), f.nnodes, fp);
 			fread(f.blocks, sizeof(block), f.nblocks, fp);
+			//print_info();
 		}
 		else {
 			fp = fopen(filename, "w+");
@@ -148,7 +149,7 @@ void* hello_init(struct fuse_conn_info *conn)
 		blocks_init();
 	}
 	
-	return &f;
+	return 0;
 }
 
 void hello_destroy(void *v)
@@ -176,7 +177,7 @@ int pathmatch(const char *dir, const char *path)
 	return fnmatch(a_path, path, FNM_PATHNAME);
 }
 
-static int hello_getattr(const char *path, struct stat *stbuf)
+int hello_getattr(const char *path, struct stat *stbuf)
 {
 
 	memset(stbuf, 0, sizeof(struct stat));
@@ -193,11 +194,11 @@ static int hello_getattr(const char *path, struct stat *stbuf)
 
 	stbuf->st_mode = f.nodes[i].mode;
 	stbuf->st_nlink = 1;
-	stbuf->st_size = f.nodes[i].size;		
+	stbuf->st_size = f.nodes[i].size;	
 	return 0;
 }
 
-static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 			 off_t offset, struct fuse_file_info *fi)
 {
 	(void) offset;
@@ -233,7 +234,7 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return 0;
 }
 
-static int hello_open(const char *path, struct fuse_file_info *fi)
+int hello_open(const char *path, struct fuse_file_info *fi)
 {
 	if ( path_search(path) == -1 ){
 		return -ENOENT;	
@@ -241,7 +242,7 @@ static int hello_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static int hello_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
+int hello_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 {
 	//open file if it exists. if not the create and open file
 	if ( path_search(path) == -ENOENT ) {
@@ -261,7 +262,7 @@ static int hello_create(const char *path, mode_t mode, struct fuse_file_info *fi
 	return 0;
 }
 
-static int hello_read(const char *path, char *buf, size_t size, off_t offset,
+int hello_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	//return number of bytes read
@@ -314,7 +315,7 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 	return size;
 }
 
-static int hello_write(const char *path, const char *buf, size_t size, off_t offset,
+int hello_write(const char *path, const char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	//return number of bytes written
@@ -381,7 +382,7 @@ static int hello_write(const char *path, const char *buf, size_t size, off_t off
 	return offset;	 
 }
 
-static int hello_mkdir(const char *path, mode_t mode)
+int hello_mkdir(const char *path, mode_t mode)
 {
 	if ( path_search(path) == -ENOENT) {
 		//directory doesn't exist
@@ -402,7 +403,7 @@ static int hello_mkdir(const char *path, mode_t mode)
 	return -EEXIST;
 }
 
-static int free_block(int index)
+int free_block(int index)
 {
 	int next;
 	f.blocks[index].status = unusedblock;
@@ -411,7 +412,7 @@ static int free_block(int index)
 	return next;
 }
 
-static int hello_truncate(const char *path, off_t offset)
+int hello_truncate(const char *path, off_t offset)
 {
 	int fileblock, size2, i;
 
@@ -455,7 +456,7 @@ static int hello_truncate(const char *path, off_t offset)
 	return 0;	
 }
 
-static int hello_unlink(const char *path)
+int hello_unlink(const char *path)
 {
 	int status, i;
 	
@@ -471,7 +472,7 @@ static int hello_unlink(const char *path)
 	return 0;
 }
 
-static int hello_rmdir(const char *path)
+int hello_rmdir(const char *path)
 {
 	int i, j, index = -1;
 	
@@ -502,7 +503,7 @@ static int hello_rmdir(const char *path)
 
 }
 
-static int hello_rename(const char *path, const char *newpath)
+int hello_rename(const char *path, const char *newpath)
 {
 	// works only for files and not directories
 	int i = path_search(path);
@@ -520,7 +521,7 @@ static int hello_rename(const char *path, const char *newpath)
 	return 0;
 }
 
-static int hello_opendir(const char *path, struct fuse_file_info *fu)
+int hello_opendir(const char *path, struct fuse_file_info *fu)
 {
 	int i;
 	if (strcmp("/", path) == 0) {
@@ -536,12 +537,12 @@ static int hello_opendir(const char *path, struct fuse_file_info *fu)
 	return -ENOENT;
 }
 
-static int hello_flush(const char *path, struct fuse_file_info *f)
+int hello_flush(const char *path, struct fuse_file_info *f)
 {
 	return 0;
 }
 
-static struct fuse_operations hello_oper = {
+struct fuse_operations hello_oper = {
 	.getattr	= hello_getattr,
 	.readdir	= hello_readdir,
 	.opendir	= hello_opendir,
@@ -554,7 +555,6 @@ static struct fuse_operations hello_oper = {
 	.write 		= hello_write,
 	.unlink		= hello_unlink,
 	.flush		= hello_flush,
-	.init 		= hello_init,
 	.destroy 	= hello_destroy,
 	.rename 	= hello_rename
 };
@@ -569,7 +569,6 @@ int main(int argc, char *argv[])
 	if (argc == 4) {
 		strcpy(filename, argv[3]);
 		persistent = 1;
-		argc-=1;
 	}
 
 	size_t size_bytes = atoi(argv[2])*1000000;
@@ -581,7 +580,8 @@ int main(int argc, char *argv[])
 	//fprintf(stderr,"number of nodes: %d\n", NNODES);
 	//fprintf(stderr,"Total space for storage: %lu\n", storage);
 
-	argv[2] = argv[1];
-	argv[1] = "-d";
+	hello_init();
+
+	argc = 2;
 	return fuse_main(argc, argv, &hello_oper, NULL);
 }
