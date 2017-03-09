@@ -23,7 +23,7 @@ Makefile creates an executable program named ramdisk, and this program can accep
 - the size (MB) of your filesystem 
 - an additional, optional argument, path of a file to load data from when mounted or save data to when unmounted. The size of the file will the size you provide as argument 2
 
-    ramdisk <mount_point> <size> [<filename>] 
+`ramdisk <mount_point> <size> [<filename>] `
 
 Be able to run postmark in unbuffered mode. This requires supporting at least the following system calls.
 
