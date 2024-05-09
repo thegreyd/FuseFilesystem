@@ -1,4 +1,4 @@
-# An in-memory filesystem (i.e. RAMDISK) using FUSE
+# An in-memory filesystem using FUSE
 
 https://en.wikipedia.org/wiki/Initial_ramdisk
 
